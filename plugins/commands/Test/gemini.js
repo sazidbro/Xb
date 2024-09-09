@@ -1,144 +1,227 @@
-const config = {
-    name: "ttt",  // Command name
-    description: "Play a game of Tic-Tac-Toe!",  // Command description
-    usage: "[start | move <row> <col>]",  // Command usage
-    cooldown: 3,  // Cooldown time
-    permissions: [0, 1, 2],  // Permissions: everyone can play
-    credits: "Sazid",  // Author credit
-    nsfw: false  // No NSFW content
-}
+const axios = require('axios');
+const fs = require('fs-extra');
+const path = require('path');
+const ytdl = require("ytdl-core");
+const yts = require("yt-search");
 
+// Command Configuration
+const commandConfig = {
+    name: "gemini2",
+    aliases: ["bard"],
+    version: "4.0",
+    author: "Sazid",
+    cooldown: 5,
+    role: 0,
+    longDescription: "Handles various media tasks including downloading audio, video, and generating images.",
+    category: "ai",
+    guide: {
+        en: "{p}gemini2 [draw/send/sing] [prompt] - Handles media tasks or generates responses based on user prompts."
+    }
+};
+
+// Language Data
 const langData = {
     "en_US": {
-        "startGame": "Starting a game of Tic-Tac-Toe!\nPlayer 1 (X) vs Player 2 (O)",
-        "invalidMove": "Invalid move! Please pick an empty cell.",
-        "turn": "It's {player}'s turn ({symbol}).",
-        "win": "{player} ({symbol}) wins the game!",
-        "draw": "It's a draw!",
-        "invalidInput": "Invalid input! Use the correct format: ttt move <row> <col>.",
-        "gameOver": "Game over! Start a new game with ttt start."
+        "noSongFound": "No song found for the given query.",
+        "noVideoFound": "No videos found for the given query.",
+        "error": "Sorry, an error occurred while processing your request.",
+        "noPrompt": "Please provide a prompt."
     },
     "vi_VN": {
-        "startGame": "Bắt đầu trò chơi Cờ Caro!\nNgười chơi 1 (X) vs Người chơi 2 (O)",
-        "invalidMove": "Nước đi không hợp lệ! Hãy chọn ô trống.",
-        "turn": "Lượt của {player} ({symbol}).",
-        "win": "{player} ({symbol}) thắng trò chơi!",
-        "draw": "Hòa!",
-        "invalidInput": "Nhập không hợp lệ! Sử dụng đúng định dạng: ttt move <row> <col>.",
-        "gameOver": "Trò chơi kết thúc! Bắt đầu trò chơi mới với ttt start."
+        "noSongFound": "Không tìm thấy bài hát cho truy vấn đã cho.",
+        "noVideoFound": "Không tìm thấy video cho truy vấn đã cho.",
+        "error": "Xin lỗi, đã xảy ra lỗi trong khi xử lý yêu cầu của bạn.",
+        "noPrompt": "Vui lòng cung cấp một gợi ý."
     },
     "ar_SY": {
-        "startGame": "بدء لعبة تيك تاك تو!\nلاعب 1 (X) مقابل لاعب 2 (O)",
-        "invalidMove": "خطوة غير صالحة! اختر خلية فارغة.",
-        "turn": "دور {player} ({symbol}).",
-        "win": "{player} ({symbol}) يفوز باللعبة!",
-        "draw": "إنه تعادل!",
-        "invalidInput": "إدخال غير صالح! استخدم التنسيق الصحيح: ttt move <row> <col>.",
-        "gameOver": "انتهت اللعبة! ابدأ لعبة جديدة باستخدام ttt start."
+        "noSongFound": "لم يتم العثور على أغنية للبحث المعطى.",
+        "noVideoFound": "لم يتم العثور على مقاطع الفيديو للبحث المعطى.",
+        "error": "عذرًا، حدث خطأ أثناء معالجة طلبك.",
+        "noPrompt": "يرجى تقديم موجه."
+    }
+};
+
+// Utility Functions
+async function fetchAnswer(prompt, uid) {
+    try {
+        const response = await axios.get(`https://gemini-ai-pearl-two.vercel.app/kshitiz?prompt=${encodeURIComponent(prompt)}&uid=${uid}&apikey=kshitiz`);
+        return response.data.answer;
+    } catch (error) {
+        throw error;
     }
 }
 
-let gameState = {};
-
-function initGame(player1, player2) {
-    return {
-        board: [
-            ["-", "-", "-"],
-            ["-", "-", "-"],
-            ["-", "-", "-"]
-        ],
-        currentPlayer: player1,
-        player1,
-        player2,
-        symbols: { [player1]: "X", [player2]: "O" },
-        isGameOver: false
-    };
-}
-
-function renderBoard(board) {
-    return board.map(row => row.join(" ")).join("\n");
-}
-
-function checkWin(board, symbol) {
-    const winLines = [
-        // Rows
-        [ [0, 0], [0, 1], [0, 2] ],
-        [ [1, 0], [1, 1], [1, 2] ],
-        [ [2, 0], [2, 1], [2, 2] ],
-        // Columns
-        [ [0, 0], [1, 0], [2, 0] ],
-        [ [0, 1], [1, 1], [2, 1] ],
-        [ [0, 2], [1, 2], [2, 2] ],
-        // Diagonals
-        [ [0, 0], [1, 1], [2, 2] ],
-        [ [0, 2], [1, 1], [2, 0] ]
-    ];
-    
-    return winLines.some(line => line.every(([r, c]) => board[r][c] === symbol));
-}
-
-function checkDraw(board) {
-    return board.every(row => row.every(cell => cell !== "-"));
-}
-
-async function onCall({ message, args, getLang }) {
-    const playerID = message.senderID;
-
-    if (!args.length) {
-        return message.reply(getLang("invalidInput"));
-    }
-
-    const command = args[0].toLowerCase();
-    
-    if (command === "start") {
-        // Start a new game
-        const opponentID = args[1];
-        if (!opponentID) {
-            return message.reply("Please mention your opponent!");
-        }
-        
-        gameState[playerID] = initGame(playerID, opponentID);
-        
-        message.reply(getLang("startGame") + "\n" + renderBoard(gameState[playerID].board));
-        message.reply(getLang("turn", { player: "Player 1", symbol: "X" }));
-    } else if (command === "move") {
-        const game = gameState[playerID];
-        if (!game || game.isGameOver) {
-            return message.reply(getLang("gameOver"));
-        }
-
-        const row = parseInt(args[1], 10);
-        const col = parseInt(args[2], 10);
-
-        if (isNaN(row) || isNaN(col) || row < 0 || row > 2 || col < 0 || col > 2 || game.board[row][col] !== "-") {
-            return message.reply(getLang("invalidMove"));
-        }
-
-        game.board[row][col] = game.symbols[game.currentPlayer];
-        
-        // Check for win
-        if (checkWin(game.board, game.symbols[game.currentPlayer])) {
-            game.isGameOver = true;
-            return message.reply(renderBoard(game.board) + "\n" + getLang("win", { player: `Player ${game.currentPlayer === game.player1 ? "1" : "2"}`, symbol: game.symbols[game.currentPlayer] }));
-        }
-
-        // Check for draw
-        if (checkDraw(game.board)) {
-            game.isGameOver = true;
-            return message.reply(renderBoard(game.board) + "\n" + getLang("draw"));
-        }
-
-        // Switch players
-        game.currentPlayer = game.currentPlayer === game.player1 ? game.player2 : game.player1;
-        message.reply(renderBoard(game.board));
-        message.reply(getLang("turn", { player: game.currentPlayer === game.player1 ? "Player 1" : "Player 2", symbol: game.symbols[game.currentPlayer] }));
-    } else {
-        message.reply(getLang("invalidInput"));
+async function fetchImageUrl(prompt) {
+    try {
+        const response = await axios.get(`https://sdxl-kshitiz.onrender.com/gen?prompt=${encodeURIComponent(prompt)}&style=3`);
+        return response.data.url;
+    } catch (error) {
+        throw error;
     }
 }
 
-export default {
-    config,
-    langData,
-    onCall
+async function describeImage(prompt, photoUrl) {
+    try {
+        const url = `https://sandipbaruwal.onrender.com/gemini2?prompt=${encodeURIComponent(prompt)}&url=${encodeURIComponent(photoUrl)}`;
+        const response = await axios.get(url);
+        return response.data.answer;
+    } catch (error) {
+        throw error;
+    }
 }
+
+async function downloadAudio(api, event, args, message) {
+    try {
+        const songName = args.join(" ");
+        const searchResults = await yts(songName);
+
+        if (!searchResults.videos.length) {
+            return message.reply(getLang("noSongFound"));
+        }
+
+        const video = searchResults.videos[0];
+        const videoUrl = video.url;
+        const stream = ytdl(videoUrl, { filter: "audioonly" });
+        const fileName = `music.mp3`; 
+        const filePath = path.join(__dirname, "tmp", fileName);
+
+        stream.pipe(fs.createWriteStream(filePath));
+
+        stream.on('response', () => console.info('[DOWNLOADER]', 'Starting download now!'));
+        stream.on('info', (info) => console.info('[DOWNLOADER]', `Downloading ${info.videoDetails.title} by ${info.videoDetails.author.name}`));
+
+        stream.on('end', () => {
+            const audioStream = fs.createReadStream(filePath);
+            message.reply({ attachment: audioStream });
+            api.setMessageReaction("✅", event.messageID, () => {}, true);
+        });
+    } catch (error) {
+        console.error("Error:", error);
+        message.reply(getLang("error"));
+    }
+}
+
+async function downloadVideo(api, event, args, message) {
+    try {
+        const query = args.join(" ");
+        const searchResults = await yts(query);
+
+        if (!searchResults.videos.length) {
+            return message.reply(getLang("noVideoFound"));
+        }
+
+        const video = searchResults.videos[0];
+        const videoUrl = video.url;
+        const stream = ytdl(videoUrl, { filter: "audioandvideo" }); 
+        const fileName = `music.mp4`;
+        const filePath = path.join(__dirname, "tmp", fileName);
+
+        stream.pipe(fs.createWriteStream(filePath));
+
+        stream.on('response', () => console.info('[DOWNLOADER]', 'Starting download now!'));
+        stream.on('info', (info) => console.info('[DOWNLOADER]', `Downloading ${info.videoDetails.title} by ${info.videoDetails.author.name}`));
+
+        stream.on('end', () => {
+            const videoStream = fs.createReadStream(filePath);
+            message.reply({ attachment: videoStream });
+            api.setMessageReaction("✅", event.messageID, () => {}, true);
+        });
+    } catch (error) {
+        console.error("Error:", error);
+        message.reply(getLang("error"));
+    }
+}
+
+async function generateImage(message, prompt) {
+    try {
+        const imageUrl = await fetchImageUrl(prompt);
+        const filePath = path.join(__dirname, 'cache', `image_${Date.now()}.png`);
+        const writer = fs.createWriteStream(filePath);
+
+        const response = await axios({
+            url: imageUrl,
+            method: 'GET',
+            responseType: 'stream'
+        });
+
+        response.data.pipe(writer);
+
+        return new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        }).then(() => {
+            message.reply({
+                body: "Generated image:",
+                attachment: fs.createReadStream(filePath)
+            });
+        });
+    } catch (error) {
+        console.error("Error:", error);
+        message.reply("An error occurred while generating the image.");
+    }
+}
+
+// Main Command Handler
+async function handleCommand({ api, message, event, args }) {
+    try {
+        const userID = event.senderID;
+        let prompt = args.join(" ").trim();
+        let action = "";
+
+        if (args[0].toLowerCase() === "draw") {
+            action = "draw";
+            prompt = args.slice(1).join(" ").trim();
+        } else if (args[0].toLowerCase() === "send") {
+            action = "sendTikTok";
+            prompt = args.slice(1).join(" ").trim();
+        } else if (args[0].toLowerCase() === "sing") {
+            action = "sing";
+            prompt = args.slice(1).join(" ").trim();
+        } else if (event.messageReply && event.messageReply.attachments && event.messageReply.attachments.length > 0) {
+            const photoUrl = event.messageReply.attachments[0].url;
+            const description = await describeImage(prompt, photoUrl);
+            message.reply(`Description: ${description}`);
+            return;
+        }
+
+        if (!prompt) {
+            return message.reply(getLang("noPrompt"));
+        }
+
+        switch(action) {
+            case "draw":
+                await generateImage(message, prompt);
+                break;
+            case "sendTikTok":
+                await downloadVideo(api, event, args.slice(1), message);
+                break;
+            case "sing":
+                await downloadAudio(api, event, args.slice(1), message);
+                break;
+            default:
+                const answer = await fetchAnswer(prompt, userID);
+                message.reply(answer, (error, info) => {
+                    global.GoatBot.onReply.set(info.messageID, {
+                        commandName: commandConfig.name,
+                        uid: userID
+                    });
+                });
+                break;
+        }
+    } catch (error) {
+        console.error("Error:", error.message);
+        message.reply(getLang("error"));
+    }
+}
+
+// Export
+module.exports = {
+    config: commandConfig,
+    handleCommand,
+    onStart: function (params) {
+        return handleCommand(params);
+    },
+    onReply: function (params) {
+        return handleCommand(params);
+    }
+};
